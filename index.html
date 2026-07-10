@@ -1,6 +1,7 @@
 <title>Список закупки</title>
 <style>
   :root {
+    color-scheme: light;
     --paper: #f7f6f1;
     --card: #fffffe;
     --ink: #23261f;
@@ -9,26 +10,6 @@
     --accent: #3f6b3a;
     --accent-soft: #eef1e6;
     --qty: #7a5a1e;
-    --field: #fbfaf4;
-    --shadow: 0 1px 2px rgba(35,38,31,.05), 0 6px 20px rgba(35,38,31,.05);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper: #16180f; --card: #1f2118; --ink: #e9e9df; --ink-soft: #a3a897;
-      --line: #34372b; --accent: #9cc088; --accent-soft: #26301f; --qty: #d9bd82;
-      --field: #14160e;
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
-    }
-  }
-  :root[data-theme="dark"] {
-    --paper: #16180f; --card: #1f2118; --ink: #e9e9df; --ink-soft: #a3a897;
-    --line: #34372b; --accent: #9cc088; --accent-soft: #26301f; --qty: #d9bd82;
-    --field: #14160e;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
-  }
-  :root[data-theme="light"] {
-    --paper: #f7f6f1; --card: #fffffe; --ink: #23261f; --ink-soft: #5b6152;
-    --line: #dcdccf; --accent: #3f6b3a; --accent-soft: #eef1e6; --qty: #7a5a1e;
     --field: #fbfaf4;
     --shadow: 0 1px 2px rgba(35,38,31,.05), 0 6px 20px rgba(35,38,31,.05);
   }
@@ -174,10 +155,6 @@ const DATA = [
     ["Моющие средства",""],["Мочалки",""],["Металл. губки (дротянки)",""],["Салфетки",""],
     ["Одноразовые стаканы",""],["Палочки для мороженого","1 уп"],
     ["Дрожжи сухие","10 п.","маленькие"],["Лаваши","18 уп"]
-  ]},
-  {t:"5. Для бара", rows:[
-    ["Серветки",""],["Стаканчики для морозива","","вафельні"],["Трубочки",""],["Насіння",""],
-    ["Кукурудзяні палички",""],["Стаканчики одноразові",""],["Крекери дрібні",""],["Соломка",""]
   ]}
 ];
 
