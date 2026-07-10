@@ -135,10 +135,28 @@
   }
   footer b { color: var(--ink); }
 
+  .sync {
+    display: inline-block; font-size: 12px; font-weight: 600;
+    padding: 1px 0; color: var(--ink-soft);
+  }
+  .sync.ok { color: var(--accent); }
+  .sync.off { color: #a6572a; }
+
   @media (max-width: 400px) {
     tbody td { font-size: 13.5px; padding: 9px 7px; }
     td.c-qty { width: 52px; font-size: 12px; }
     td.c-price { width: 76px; }
+  }
+
+  @media print {
+    .tools, .addbtn, button.del { display: none !important; }
+    body { background: #fff; }
+    .wrap { padding: 0; }
+    section.cat { box-shadow: none; break-inside: avoid; border-color: #bbb; }
+    section.cat > h2 { position: static; }
+    td.c-price input, input.name-in, input.qty-in {
+      border: 0; background: none; padding: 0; min-height: 0;
+    }
   }
 </style>
 
@@ -146,9 +164,11 @@
   <header>
     <p class="eyebrow">Оптовая закупка</p>
     <h1>Список покупок</h1>
-    <p class="sub">Отмечай купленное галочкой, цену пиши в поле справа — всё сохраняется на телефоне.</p>
+    <p class="sub">Отмечай купленное галочкой, цену пиши в поле справа. Всё синхронизируется между твоими устройствами. <span id="sync-status" class="sync"></span></p>
     <div class="tools">
-      <button id="reset">Очистить цены и галочки</button>
+      <button id="exp-pdf">Экспорт PDF</button>
+      <button id="exp-doc">Экспорт Word</button>
+      <button id="reset">Очистить</button>
     </div>
   </header>
 
@@ -187,15 +207,25 @@ const DATA = [
 ];
 
 const KEY = "shop_v3";
+const SYNC_URL = "https://kvdb.io/8QE8oVJziA6AWRAEniRhGk/state";  // общее онлайн-хранилище
+
 const st = JSON.parse(localStorage.getItem(KEY) || "{}");
-st.base = st.base || {};        // id -> {c, p}   для готовых позиций
+st.base = st.base || {};        // id -> {c, p}   готовые позиции
 st.custom = st.custom || {};    // ci -> [ {id, name, qty, p, c} ]  свои позиции
+st.rev = st.rev || 0;           // версия документа (метка времени)
+
 function save(){ localStorage.setItem(KEY, JSON.stringify(st)); }
+function stamp(){ st.rev = Date.now(); }
+
 let seq = 0;
-Object.values(st.custom).forEach(arr => (arr||[]).forEach(it => {
-  const n = parseInt(String(it.id).replace(/\D/g,""), 10);
-  if(!isNaN(n) && n > seq) seq = n;
-}));
+function recomputeSeq(){
+  seq = 0;
+  Object.values(st.custom).forEach(arr => (arr||[]).forEach(it => {
+    const n = parseInt(String(it.id).replace(/\D/g,""), 10);
+    if(!isNaN(n) && n > seq) seq = n;
+  }));
+}
+recomputeSeq();
 function uid(){ return "u" + (++seq); }
 
 const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -228,21 +258,20 @@ function customRow(ci, item){
   </tr>`;
 }
 
-DATA.forEach((cat, ci) => {
-  const sec = document.createElement("section");
-  sec.className = "cat";
-  const base = cat.rows.map((r, ri) => baseRow(ci, ri, r)).join("");
-  const cust = (st.custom[ci] || []).map(it => customRow(ci, it)).join("");
-  sec.innerHTML = `<h2>${cat.t}</h2>
-    <table><thead><tr>
-      <th class="c-check"></th><th>Наименование</th>
-      <th class="c-qty">Кол-во</th><th class="c-price">Цена</th>
-    </tr></thead><tbody>${base}${cust}</tbody></table>
-    <button class="addbtn" data-add="${ci}">+ Добавить позицию</button>
-    <div class="total">Сумма по разделу<b data-total>0</b></div>`;
-  app.appendChild(sec);
-  recalc(sec);
-});
+function render(){
+  app.innerHTML = DATA.map((cat, ci) => {
+    const base = cat.rows.map((r, ri) => baseRow(ci, ri, r)).join("");
+    const cust = (st.custom[ci] || []).map(it => customRow(ci, it)).join("");
+    return `<section class="cat"><h2>${esc(cat.t)}</h2>
+      <table><thead><tr>
+        <th class="c-check"></th><th>Наименование</th>
+        <th class="c-qty">Кол-во</th><th class="c-price">Цена</th>
+      </tr></thead><tbody>${base}${cust}</tbody></table>
+      <button class="addbtn" data-add="${ci}">+ Добавить позицию</button>
+      <div class="total">Сумма по разделу<b data-total>0</b></div></section>`;
+  }).join("");
+  document.querySelectorAll("section.cat").forEach(recalc);
+}
 
 function recalc(sec){
   let sum = 0;
@@ -258,7 +287,7 @@ function findCustom(ci, id){
   return (st.custom[ci] || []).find(x => x.id === id);
 }
 
-// добавить позицию
+// ---------- изменения данных ----------
 app.addEventListener("click", e => {
   const add = e.target.closest("[data-add]");
   if(add){
@@ -266,7 +295,7 @@ app.addEventListener("click", e => {
     const item = { id: uid(), name:"", qty:"", p:"", c:false };
     st.custom[ci] = st.custom[ci] || [];
     st.custom[ci].push(item);
-    save();
+    stamp(); save(); scheduleSync();
     const tbody = add.parentElement.querySelector("tbody");
     tbody.insertAdjacentHTML("beforeend", customRow(ci, item));
     tbody.lastElementChild.querySelector(".name-in").focus();
@@ -277,7 +306,7 @@ app.addEventListener("click", e => {
     const tr = del.closest("tr");
     const ci = +tr.dataset.ci, id = tr.dataset.id;
     st.custom[ci] = (st.custom[ci] || []).filter(x => x.id !== id);
-    save();
+    stamp(); save(); scheduleSync();
     const sec = tr.closest("section.cat");
     tr.remove();
     recalc(sec);
@@ -296,7 +325,7 @@ app.addEventListener("change", e => {
     const it = findCustom(+tr.dataset.ci, tr.dataset.id);
     if(it) it.c = e.target.checked;
   }
-  save();
+  stamp(); save(); scheduleSync();
 });
 
 app.addEventListener("input", e => {
@@ -315,13 +344,101 @@ app.addEventListener("input", e => {
     else if(e.target.matches(".qty-in")) it.qty = e.target.value;
     else if(e.target.matches(".c-price input")) it.p = e.target.value;
   }
-  save();
+  stamp(); save(); scheduleSync();
   recalc(tr.closest("section.cat"));
 });
 
+// ---------- синхронизация между устройствами ----------
+const statusEl = document.getElementById("sync-status");
+function setStatus(t, cls){ if(statusEl){ statusEl.textContent = t; statusEl.className = "sync " + (cls||""); } }
+
+let pushTimer = null, pushing = false;
+function scheduleSync(){
+  setStatus("сохранение…", "");
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(push, 600);
+}
+async function push(){
+  pushing = true;
+  try{
+    const res = await fetch(SYNC_URL, { method:"POST", body: JSON.stringify(st) });
+    if(!res.ok) throw new Error("http");
+    setStatus("сохранено на всех устройствах", "ok");
+  }catch(_){
+    setStatus("нет сети — сохранено на телефоне", "off");
+  }finally{ pushing = false; }
+}
+function editingNow(){
+  const a = document.activeElement;
+  return !!(a && app.contains(a) && a.tagName === "INPUT");
+}
+async function pull(){
+  let remote;
+  try{
+    const res = await fetch(SYNC_URL, { cache:"no-store" });
+    if(res.status === 404){ if(st.rev) push(); return; }  // на сервере пусто — зальём своё
+    if(!res.ok) return;
+    remote = JSON.parse(await res.text());
+  }catch(_){ return; }  // оффлайн — молча
+  if(!remote || typeof remote.rev !== "number") return;
+  if(remote.rev > (st.rev||0)){
+    if(editingNow() || pushing) return;   // не мешаем текущим правкам, применим позже
+    st.base = remote.base || {};
+    st.custom = remote.custom || {};
+    st.rev = remote.rev;
+    recomputeSeq(); save(); render();
+    setStatus("обновлено с другого устройства", "ok");
+  } else if(remote.rev < (st.rev||0) && !pushing){
+    push();   // локально новее — дольём на сервер
+  }
+}
+
+render();
+pull();
+setInterval(pull, 5000);
+window.addEventListener("focus", pull);
+
+// ---------- экспорт ----------
+function exportRows(){
+  return DATA.map((cat, ci) => {
+    const rows = cat.rows.map((r, ri) => {
+      const s = st.base[ci+"_"+ri] || {};
+      const nm = r[0] + (r[2] ? " (" + r[2] + ")" : "");
+      return { name: nm, qty: r[1]||"", p: s.p||"", c: !!s.c };
+    }).concat((st.custom[ci]||[]).map(it => ({ name: it.name||"", qty: it.qty||"", p: it.p||"", c: !!it.c })))
+      .filter(x => (x.name||"").trim() !== "");
+    return { t: cat.t, rows };
+  });
+}
+function download(blob, fname){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+document.getElementById("exp-pdf").addEventListener("click", () => window.print());
+document.getElementById("exp-doc").addEventListener("click", () => {
+  let body = "<h1>Список покупок</h1>";
+  exportRows().forEach(cat => {
+    body += `<h2>${esc(cat.t)}</h2>`;
+    body += `<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;width:100%">`;
+    body += `<tr><th>&#10003;</th><th align="left">Наименование</th><th>Кол-во</th><th>Цена</th></tr>`;
+    cat.rows.forEach(r => {
+      body += `<tr><td align="center">${r.c ? "&#10003;" : ""}</td><td>${esc(r.name)}</td>`
+            + `<td align="center">${esc(r.qty)}</td><td align="right">${esc(r.p)}</td></tr>`;
+    });
+    body += `</table><br>`;
+  });
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" `
+    + `xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">`
+    + `<head><meta charset="utf-8"><title>Список покупок</title></head><body>${body}</body></html>`;
+  download(new Blob(["﻿" + html], { type:"application/msword" }), "spisok-zakupki.doc");
+});
+
+// ---------- сброс ----------
 document.getElementById("reset").addEventListener("click", () => {
-  if(!confirm("Очистить все галочки, цены и добавленные позиции?")) return;
-  localStorage.removeItem(KEY);
-  location.reload();
+  if(!confirm("Очистить все галочки, цены и добавленные позиции? Это очистит и на других устройствах.")) return;
+  st.base = {}; st.custom = {}; stamp(); save(); render(); push();
 });
 </script>
