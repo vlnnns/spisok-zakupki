@@ -101,6 +101,34 @@
   }
   .total b { font-variant-numeric: tabular-nums; }
 
+  .addbtn {
+    display: block; width: 100%; text-align: left;
+    font: inherit; font-size: 13.5px; font-weight: 600; color: var(--accent);
+    background: none; border: 0; border-top: 1px dashed var(--line);
+    padding: 11px 14px; cursor: pointer;
+  }
+  .addbtn:active { background: var(--accent-soft); }
+
+  td.c-name .row-in {
+    display: flex; align-items: center; gap: 6px;
+  }
+  input.name-in, input.qty-in {
+    font: inherit; color: var(--ink); background: var(--field);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 7px 8px; min-height: 34px; width: 100%;
+  }
+  input.name-in { font-size: 14px; }
+  input.qty-in { font-size: 13px; text-align: right; }
+  input.name-in:focus, input.qty-in:focus {
+    outline: 2px solid var(--accent); outline-offset: -1px;
+  }
+  button.del {
+    flex: none; width: 26px; height: 26px; padding: 0; cursor: pointer;
+    font-size: 18px; line-height: 1; color: var(--ink-soft);
+    background: none; border: 0; border-radius: 6px;
+  }
+  button.del:active { background: var(--accent-soft); color: var(--accent); }
+
   footer {
     margin-top: 22px; padding: 14px 4px 0; border-top: 1px solid var(--line);
     color: var(--ink-soft); font-size: 12.5px; line-height: 1.55;
@@ -158,35 +186,62 @@ const DATA = [
   ]}
 ];
 
-const store = JSON.parse(localStorage.getItem("shop_v2") || "{}");
-function save(){ localStorage.setItem("shop_v2", JSON.stringify(store)); }
+const KEY = "shop_v3";
+const st = JSON.parse(localStorage.getItem(KEY) || "{}");
+st.base = st.base || {};        // id -> {c, p}   для готовых позиций
+st.custom = st.custom || {};    // ci -> [ {id, name, qty, p, c} ]  свои позиции
+function save(){ localStorage.setItem(KEY, JSON.stringify(st)); }
+let seq = 0;
+Object.values(st.custom).forEach(arr => (arr||[]).forEach(it => {
+  const n = parseInt(String(it.id).replace(/\D/g,""), 10);
+  if(!isNaN(n) && n > seq) seq = n;
+}));
+function uid(){ return "u" + (++seq); }
 
+const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const app = document.getElementById("app");
+
+function baseRow(ci, ri, r){
+  const id = ci+"_"+ri;
+  const name = r[0], qty = r[1]||"", hint = r[2]||"";
+  const s = st.base[id] || {};
+  const done = s.c ? " done" : "";
+  const hintHtml = hint ? ` <span class="hint">${esc(hint)}</span>` : "";
+  return `<tr class="row${done}" data-kind="base" data-id="${id}">
+    <td class="c-check"><input type="checkbox" ${s.c?"checked":""}></td>
+    <td class="c-name">${esc(name)}${hintHtml}</td>
+    <td class="c-qty">${esc(qty)}</td>
+    <td class="c-price"><input type="text" inputmode="decimal" value="${esc(s.p||"")}" placeholder="—"></td>
+  </tr>`;
+}
+
+function customRow(ci, item){
+  const done = item.c ? " done" : "";
+  return `<tr class="row${done}" data-kind="custom" data-ci="${ci}" data-id="${item.id}">
+    <td class="c-check"><input type="checkbox" ${item.c?"checked":""}></td>
+    <td class="c-name"><div class="row-in">
+      <input class="name-in" placeholder="Название" value="${esc(item.name||"")}">
+      <button class="del" title="Удалить" aria-label="Удалить">×</button>
+    </div></td>
+    <td class="c-qty"><input class="qty-in" placeholder="кол-во" value="${esc(item.qty||"")}"></td>
+    <td class="c-price"><input type="text" inputmode="decimal" value="${esc(item.p||"")}" placeholder="—"></td>
+  </tr>`;
+}
+
 DATA.forEach((cat, ci) => {
   const sec = document.createElement("section");
   sec.className = "cat";
-  const rowsHtml = cat.rows.map((r, ri) => {
-    const id = ci+"_"+ri;
-    const name = r[0], qty = r[1]||"", hint = r[2]||"";
-    const s = store[id] || {};
-    const checked = s.c ? "checked" : "";
-    const done = s.c ? " done" : "";
-    const price = s.p != null ? s.p : "";
-    const hintHtml = hint ? ` <span class="hint">${hint}</span>` : "";
-    return `<tr class="row${done}" data-id="${id}">
-      <td class="c-check"><input type="checkbox" ${checked}></td>
-      <td class="c-name">${name}${hintHtml}</td>
-      <td class="c-qty">${qty}</td>
-      <td class="c-price"><input type="text" inputmode="decimal" value="${price}" placeholder="—"></td>
-    </tr>`;
-  }).join("");
+  const base = cat.rows.map((r, ri) => baseRow(ci, ri, r)).join("");
+  const cust = (st.custom[ci] || []).map(it => customRow(ci, it)).join("");
   sec.innerHTML = `<h2>${cat.t}</h2>
     <table><thead><tr>
       <th class="c-check"></th><th>Наименование</th>
       <th class="c-qty">Кол-во</th><th class="c-price">Цена</th>
-    </tr></thead><tbody>${rowsHtml}</tbody></table>
+    </tr></thead><tbody>${base}${cust}</tbody></table>
+    <button class="addbtn" data-add="${ci}">+ Добавить позицию</button>
     <div class="total">Сумма по разделу<b data-total>0</b></div>`;
   app.appendChild(sec);
+  recalc(sec);
 });
 
 function recalc(sec){
@@ -199,33 +254,74 @@ function recalc(sec){
     (Math.round(sum*100)/100).toLocaleString("ru-RU");
 }
 
-document.querySelectorAll("section.cat").forEach(recalc);
+function findCustom(ci, id){
+  return (st.custom[ci] || []).find(x => x.id === id);
+}
+
+// добавить позицию
+app.addEventListener("click", e => {
+  const add = e.target.closest("[data-add]");
+  if(add){
+    const ci = +add.dataset.add;
+    const item = { id: uid(), name:"", qty:"", p:"", c:false };
+    st.custom[ci] = st.custom[ci] || [];
+    st.custom[ci].push(item);
+    save();
+    const tbody = add.parentElement.querySelector("tbody");
+    tbody.insertAdjacentHTML("beforeend", customRow(ci, item));
+    tbody.lastElementChild.querySelector(".name-in").focus();
+    return;
+  }
+  const del = e.target.closest("button.del");
+  if(del){
+    const tr = del.closest("tr");
+    const ci = +tr.dataset.ci, id = tr.dataset.id;
+    st.custom[ci] = (st.custom[ci] || []).filter(x => x.id !== id);
+    save();
+    const sec = tr.closest("section.cat");
+    tr.remove();
+    recalc(sec);
+  }
+});
 
 app.addEventListener("change", e => {
+  if(e.target.type !== "checkbox") return;
   const tr = e.target.closest("tr");
-  if(!tr) return;
-  const id = tr.dataset.id;
-  store[id] = store[id] || {};
-  if(e.target.type === "checkbox"){
-    store[id].c = e.target.checked;
-    tr.classList.toggle("done", e.target.checked);
+  tr.classList.toggle("done", e.target.checked);
+  if(tr.dataset.kind === "base"){
+    const id = tr.dataset.id;
+    st.base[id] = st.base[id] || {};
+    st.base[id].c = e.target.checked;
+  } else {
+    const it = findCustom(+tr.dataset.ci, tr.dataset.id);
+    if(it) it.c = e.target.checked;
   }
   save();
 });
+
 app.addEventListener("input", e => {
-  if(e.target.matches(".c-price input")){
-    const tr = e.target.closest("tr");
-    const id = tr.dataset.id;
-    store[id] = store[id] || {};
-    store[id].p = e.target.value;
-    save();
-    recalc(e.target.closest("section.cat"));
+  const tr = e.target.closest("tr");
+  if(!tr) return;
+  if(tr.dataset.kind === "base"){
+    if(e.target.matches(".c-price input")){
+      const id = tr.dataset.id;
+      st.base[id] = st.base[id] || {};
+      st.base[id].p = e.target.value;
+    } else return;
+  } else {
+    const it = findCustom(+tr.dataset.ci, tr.dataset.id);
+    if(!it) return;
+    if(e.target.matches(".name-in")) it.name = e.target.value;
+    else if(e.target.matches(".qty-in")) it.qty = e.target.value;
+    else if(e.target.matches(".c-price input")) it.p = e.target.value;
   }
+  save();
+  recalc(tr.closest("section.cat"));
 });
 
 document.getElementById("reset").addEventListener("click", () => {
-  if(!confirm("Очистить все галочки и цены?")) return;
-  localStorage.removeItem("shop_v2");
+  if(!confirm("Очистить все галочки, цены и добавленные позиции?")) return;
+  localStorage.removeItem(KEY);
   location.reload();
 });
 </script>
